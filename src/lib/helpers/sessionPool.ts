@@ -18,10 +18,10 @@ const SESSION_TTL = 6 * 60 * 60 * 1000;
 
 const sessions = new Map<string, PoolEntry>();
 
-const poolKey = async (cookies: string): Promise<string> => {
+const poolKey = async (cookies: string, pageId: string): Promise<string> => {
     const digest = await crypto.subtle.digest(
         "SHA-256",
-        new TextEncoder().encode(cookies),
+        new TextEncoder().encode(`${cookies}\n${pageId}`),
     );
     return Array.from(new Uint8Array(digest))
         .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -42,14 +42,21 @@ const evictExpired = () => {
     }
 };
 
-// A session bound to the given cookies. The PO token is minted by the same
-// session that issues the requests, so each set of cookies needs its own.
+/**
+ * A session bound to the given cookies, and optionally acting as one of that account's other
+ * pages. The PO token is minted by the same session that issues the requests, so each set of
+ * cookies needs its own — and so does each page, since the page is part of who is asking.
+ *
+ * Cookies identify an ACCOUNT, not a channel: an account's brand channels share them, and without
+ * a page id every request is attributed to the account's own channel.
+ */
 export const getPooledSession = async (
     cookies: string,
     config: Config,
     metrics: Metrics | undefined,
+    pageId = "",
 ): Promise<PooledSession> => {
-    const key = await poolKey(cookies);
+    const key = await poolKey(cookies, pageId);
     const cached = sessions.get(key);
     if (cached && Date.now() - cached.createdAt < SESSION_TTL) {
         return cached.session;
@@ -57,6 +64,7 @@ export const getPooledSession = async (
 
     const session = poTokenGenerate(config, metrics, {
         cookies,
+        pageId,
         validate: false,
         poolKey: key,
     });

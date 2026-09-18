@@ -29,6 +29,7 @@ const InputInitialiseSchema = z.object({
     type: z.literal("initialise"),
     config: ConfigSchema,
     cookies: z.string().optional(),
+    pageId: z.string().optional(),
 }).strict();
 
 const InputContentTokenSchema = z.object({
@@ -101,6 +102,7 @@ if (isWorker) {
                     fetchImpl,
                     innertubeClientCookies: message.cookies ??
                         message.config.youtube_session.cookies,
+                    pageId: message.pageId,
                 });
                 minter = generatedMinter;
                 postMessage({
@@ -134,9 +136,10 @@ if (isWorker) {
 }
 
 async function setup(
-    { fetchImpl, innertubeClientCookies }: {
+    { fetchImpl, innertubeClientCookies, pageId }: {
         fetchImpl: FetchFunction;
         innertubeClientCookies: string;
+        pageId?: string;
     },
 ) {
     const innertubeClient = await Innertube.create({
@@ -145,6 +148,7 @@ async function setup(
         user_agent: USER_AGENT,
         retrieve_player: false,
         cookie: innertubeClientCookies || undefined,
+        ...(pageId ? { on_behalf_of_user: pageId } : {}),
         player_id: PLAYER_ID,
     });
 

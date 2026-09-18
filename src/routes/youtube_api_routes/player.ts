@@ -15,6 +15,8 @@ player.post("/player", async (c) => {
     const cookies = typeof jsonReq.cookies === "string" && jsonReq.cookies
         ? jsonReq.cookies
         : undefined;
+    // Cookies identify an account; this picks which of its pages (channels) is asking.
+    const pageId = typeof jsonReq.pageId === "string" ? jsonReq.pageId : "";
 
     let innertubeClient = c.get("innertubeClient");
     let tokenMinter = c.get("tokenMinter");
@@ -48,7 +50,12 @@ player.post("/player", async (c) => {
         }
 
         if (cookies) {
-            const session = await getPooledSession(cookies, config, metrics);
+            const session = await getPooledSession(
+                cookies,
+                config,
+                metrics,
+                pageId,
+            );
             innertubeClient = session.innertubeClient;
             tokenMinter = session.tokenMinter;
         }

@@ -23,6 +23,7 @@ const STATS_HOSTS = ["s.youtube.com", "www.youtube.com"];
 const StatsRequestSchema = z.object({
     videoId: z.string(),
     cookies: z.string().optional(),
+    pageId: z.string().optional(),
     cpn: z.string().min(1).max(64).optional(),
     event: z.enum(["start", "progress", "end"]),
     playbackUrl: z.string().optional(),
@@ -77,7 +78,7 @@ stats.post("/stats", async (c) => {
     let innertubeClient = c.get("innertubeClient");
     if (body.cookies) {
         innertubeClient =
-            (await getPooledSession(body.cookies, config, metrics))
+            (await getPooledSession(body.cookies, config, metrics, body.pageId))
                 .innertubeClient;
     }
 
@@ -119,8 +120,15 @@ stats.post("/stats", async (c) => {
     }
 
     const fetchClient = await getFetchClient(config);
+    // A stats ping is not an InnerTube request, so YouTube.js adds neither of these itself: the
+    // cookie says which account this is, the page id which of its channels the view belongs to.
+    // Without the page id a brand channel's view is recorded against the account's own channel.
     const headers: HeadersInit = body.cookies
-        ? { cookie: body.cookies, "user-agent": client.userAgent ?? "" }
+        ? {
+            cookie: body.cookies,
+            "user-agent": client.userAgent ?? "",
+            ...(body.pageId ? { "x-goog-pageid": body.pageId } : {}),
+        }
         : {};
 
     const response = await fetchClient(url.toString(), { headers });

@@ -61,9 +61,15 @@ export type TokenMinter = ReturnType<typeof createMinter>;
 export const poTokenGenerate = (
     config: Config,
     metrics: Metrics | undefined,
-    options: { cookies?: string; validate?: boolean; poolKey?: string } = {},
+    options: {
+        cookies?: string;
+        pageId?: string;
+        validate?: boolean;
+        poolKey?: string;
+    } = {},
 ): Promise<{ innertubeClient: Innertube; tokenMinter: TokenMinter }> => {
     const cookies = options.cookies ?? config.youtube_session.cookies;
+    const pageId = options.pageId ?? "";
     const validate = options.validate ?? true;
     const poolKey = options.poolKey ?? "default";
     const workers = workerPools.get(poolKey) ??
@@ -89,7 +95,7 @@ export const poTokenGenerate = (
             const untypedPostMessage = worker.postMessage.bind(worker);
             worker.postMessage = (message: InputMessage) =>
                 untypedPostMessage(message);
-            worker.postMessage({ type: "initialise", config, cookies });
+            worker.postMessage({ type: "initialise", config, cookies, pageId });
         }
 
         if (parsedMessage.type === "error") {
@@ -108,6 +114,8 @@ export const poTokenGenerate = (
                     fetch: getFetchClient(config),
                     generate_session_locally: true,
                     cookie: cookies || undefined,
+                    // acts as this page (a brand channel of the account the cookies belong to)
+                    ...(pageId ? { on_behalf_of_user: pageId } : {}),
                     player_id: PLAYER_ID,
                 });
                 const minter = createMinter(worker);
