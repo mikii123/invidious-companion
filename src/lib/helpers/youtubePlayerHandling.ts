@@ -129,6 +129,7 @@ export const youtubePlayerParsing = async ({
                 streamingData,
                 videoDetails,
                 microformat,
+                playbackTracking,
             },
         ) => ({
             captions,
@@ -137,6 +138,7 @@ export const youtubePlayerParsing = async ({
             streamingData,
             videoDetails,
             microformat,
+            playbackTracking,
         }))(videoData);
 
         if (videoData.playabilityStatus?.status == "OK") {

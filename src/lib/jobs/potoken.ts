@@ -25,7 +25,7 @@ interface TokenGeneratorWorker extends Omit<Worker, "postMessage"> {
     postMessage(message: InputMessage): void;
 }
 
-const workers: TokenGeneratorWorker[] = [];
+const workerPools = new Map<string, TokenGeneratorWorker[]>();
 
 function createMinter(worker: TokenGeneratorWorker) {
     return (videoId: string): Promise<string> => {
@@ -61,7 +61,13 @@ export type TokenMinter = ReturnType<typeof createMinter>;
 export const poTokenGenerate = (
     config: Config,
     metrics: Metrics | undefined,
+    options: { cookies?: string; validate?: boolean; poolKey?: string } = {},
 ): Promise<{ innertubeClient: Innertube; tokenMinter: TokenMinter }> => {
+    const cookies = options.cookies ?? config.youtube_session.cookies;
+    const validate = options.validate ?? true;
+    const poolKey = options.poolKey ?? "default";
+    const workers = workerPools.get(poolKey) ??
+        workerPools.set(poolKey, []).get(poolKey)!;
     const { promise, resolve, reject } = Promise.withResolvers<
         Awaited<ReturnType<typeof poTokenGenerate>>
     >();
@@ -83,7 +89,7 @@ export const poTokenGenerate = (
             const untypedPostMessage = worker.postMessage.bind(worker);
             worker.postMessage = (message: InputMessage) =>
                 untypedPostMessage(message);
-            worker.postMessage({ type: "initialise", config });
+            worker.postMessage({ type: "initialise", config, cookies });
         }
 
         if (parsedMessage.type === "error") {
@@ -101,17 +107,19 @@ export const poTokenGenerate = (
                     visitor_data: parsedMessage.visitorData,
                     fetch: getFetchClient(config),
                     generate_session_locally: true,
-                    cookie: config.youtube_session.cookies || undefined,
+                    cookie: cookies || undefined,
                     player_id: PLAYER_ID,
                 });
                 const minter = createMinter(worker);
-                // check token from minter
-                await checkToken({
-                    instantiatedInnertubeClient,
-                    config,
-                    integrityTokenBasedMinter: minter,
-                    metrics,
-                });
+                if (validate) {
+                    // check token from minter
+                    await checkToken({
+                        instantiatedInnertubeClient,
+                        config,
+                        integrityTokenBasedMinter: minter,
+                        metrics,
+                    });
+                }
                 console.log("[INFO] Successfully generated PO token");
                 const numberToKill = workers.length - 1;
                 for (let i = 0; i < numberToKill; i++) {

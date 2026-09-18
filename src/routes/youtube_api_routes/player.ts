@@ -2,19 +2,26 @@ import { Hono } from "hono";
 import { youtubePlayerParsing } from "../../lib/helpers/youtubePlayerHandling.ts";
 import { HTTPException } from "hono/http-exception";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
+import { getPooledSession } from "../../lib/helpers/sessionPool.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 const player = new Hono();
 
 player.post("/player", async (c) => {
     const jsonReq = await c.req.json();
-    const innertubeClient = c.get("innertubeClient");
     const config = c.get("config");
     const metrics = c.get("metrics");
-    const tokenMinter = c.get("tokenMinter");
 
-    // Check if tokenMinter is ready (only needed when PO token is enabled)
-    if (config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
+    const cookies = typeof jsonReq.cookies === "string" && jsonReq.cookies
+        ? jsonReq.cookies
+        : undefined;
+
+    let innertubeClient = c.get("innertubeClient");
+    let tokenMinter = c.get("tokenMinter");
+
+    if (
+        !cookies && config.jobs.youtube_session.po_token_enabled && !tokenMinter
+    ) {
         return c.json({
             playabilityStatus: {
                 status: "ERROR",
@@ -39,6 +46,13 @@ player.post("/player", async (c) => {
                 res: new Response("Invalid video ID format."),
             });
         }
+
+        if (cookies) {
+            const session = await getPooledSession(cookies, config, metrics);
+            innertubeClient = session.innertubeClient;
+            tokenMinter = session.tokenMinter;
+        }
+
         return c.json(
             await youtubePlayerParsing({
                 innertubeClient,
@@ -46,6 +60,8 @@ player.post("/player", async (c) => {
                 config,
                 tokenMinter: tokenMinter!,
                 metrics,
+                // responses are bound to the session that made them
+                overrideCache: Boolean(cookies),
             }),
         );
     }

@@ -28,6 +28,7 @@ const { getFetchClient }: {
 const InputInitialiseSchema = z.object({
     type: z.literal("initialise"),
     config: ConfigSchema,
+    cookies: z.string().optional(),
 }).strict();
 
 const InputContentTokenSchema = z.object({
@@ -98,7 +99,7 @@ if (isWorker) {
                     generatedMinter,
                 } = await setup({
                     fetchImpl,
-                    innertubeClientCookies:
+                    innertubeClientCookies: message.cookies ??
                         message.config.youtube_session.cookies,
                 });
                 minter = generatedMinter;
