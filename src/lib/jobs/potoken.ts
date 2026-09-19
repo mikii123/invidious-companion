@@ -57,6 +57,34 @@ function createMinter(worker: TokenGeneratorWorker) {
 
 export type TokenMinter = ReturnType<typeof createMinter>;
 
+type FetchLike = (
+    input: RequestInfo | URL,
+    init?: RequestInit,
+) => Promise<Response>;
+
+/**
+ * Wraps a fetch client so every YouTube request says which of the account's pages is asking.
+ *
+ * Cookies identify an account; a brand channel of that account is addressed with this header, and
+ * without it YouTube attributes the request to the account's own channel.
+ */
+const pageFetch = (inner: FetchLike, pageId: string): FetchLike => {
+    if (!pageId) return inner;
+    return (input, init = {}) => {
+        const url = typeof input === "string"
+            ? input
+            : input instanceof URL
+            ? input.href
+            : input.url;
+        if (!/(^|\.)youtube\.com$/.test(new URL(url).hostname)) {
+            return inner(input, init);
+        }
+        const headers = new Headers(init.headers ?? {});
+        headers.set("X-Goog-PageId", pageId);
+        return inner(input, { ...init, headers });
+    };
+};
+
 // Adapted from https://github.com/LuanRT/BgUtils/blob/main/examples/node/index.ts
 export const poTokenGenerate = (
     config: Config,
@@ -95,7 +123,7 @@ export const poTokenGenerate = (
             const untypedPostMessage = worker.postMessage.bind(worker);
             worker.postMessage = (message: InputMessage) =>
                 untypedPostMessage(message);
-            worker.postMessage({ type: "initialise", config, cookies, pageId });
+            worker.postMessage({ type: "initialise", config, cookies });
         }
 
         if (parsedMessage.type === "error") {
@@ -111,11 +139,13 @@ export const poTokenGenerate = (
                     enable_session_cache: false,
                     po_token: parsedMessage.sessionPoToken,
                     visitor_data: parsedMessage.visitorData,
-                    fetch: getFetchClient(config),
+                    // The page id rides on the fetch client rather than YouTube.js's
+                    // `on_behalf_of_user`: combined with a locally generated session that drops the
+                    // cookie authentication altogether and every request comes back 401. The header
+                    // is what YouTube actually reads.
+                    fetch: pageFetch(getFetchClient(config), pageId),
                     generate_session_locally: true,
                     cookie: cookies || undefined,
-                    // acts as this page (a brand channel of the account the cookies belong to)
-                    ...(pageId ? { on_behalf_of_user: pageId } : {}),
                     player_id: PLAYER_ID,
                 });
                 const minter = createMinter(worker);
