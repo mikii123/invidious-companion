@@ -2,10 +2,13 @@ import { Innertube } from "youtubei.js";
 import { poTokenGenerate, type TokenMinter } from "../jobs/potoken.ts";
 import type { Config } from "./config.ts";
 import { Metrics } from "./metrics.ts";
+import { CookieJar } from "./cookieJar.ts";
 
 export type PooledSession = {
     innertubeClient: Innertube;
     tokenMinter: TokenMinter;
+    /** Current cookies of this session: YouTube rotates them, and the caller stores them. */
+    jar: CookieJar;
 };
 
 type PoolEntry = {
@@ -62,12 +65,14 @@ export const getPooledSession = async (
         return cached.session;
     }
 
+    const jar = new CookieJar(cookies);
     const session = poTokenGenerate(config, metrics, {
         cookies,
         pageId,
         validate: false,
         poolKey: key,
-    });
+        jar,
+    }).then((result) => ({ ...result, jar }));
     session.catch(() => sessions.delete(key));
 
     sessions.set(key, { createdAt: Date.now(), session });

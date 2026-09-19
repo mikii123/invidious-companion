@@ -3,6 +3,7 @@ import { youtubePlayerParsing } from "../../lib/helpers/youtubePlayerHandling.ts
 import { HTTPException } from "hono/http-exception";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
 import { getPooledSession } from "../../lib/helpers/sessionPool.ts";
+import type { CookieJar } from "../../lib/helpers/cookieJar.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 const player = new Hono();
@@ -20,6 +21,7 @@ player.post("/player", async (c) => {
 
     let innertubeClient = c.get("innertubeClient");
     let tokenMinter = c.get("tokenMinter");
+    let jar: CookieJar | undefined;
 
     if (
         !cookies && config.jobs.youtube_session.po_token_enabled && !tokenMinter
@@ -58,18 +60,23 @@ player.post("/player", async (c) => {
             );
             innertubeClient = session.innertubeClient;
             tokenMinter = session.tokenMinter;
+            jar = session.jar;
         }
 
+        const player = await youtubePlayerParsing({
+            innertubeClient,
+            videoId: jsonReq.videoId,
+            config,
+            tokenMinter: tokenMinter!,
+            metrics,
+            // responses are bound to the session that made them
+            overrideCache: Boolean(cookies),
+        });
+
+        // Handing rotated cookies back is what lets the caller keep its stored copy usable: YouTube
+        // replaces the session token roughly hourly and stops accepting the previous one.
         return c.json(
-            await youtubePlayerParsing({
-                innertubeClient,
-                videoId: jsonReq.videoId,
-                config,
-                tokenMinter: tokenMinter!,
-                metrics,
-                // responses are bound to the session that made them
-                overrideCache: Boolean(cookies),
-            }),
+            jar?.rotated ? { ...player, cookies: jar.header } : player,
         );
     }
 });

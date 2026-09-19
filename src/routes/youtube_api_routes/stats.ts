@@ -4,6 +4,7 @@ import { HTTPException } from "hono/http-exception";
 import { generateRandomString } from "youtubei.js/Utils";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
 import { getPooledSession } from "../../lib/helpers/sessionPool.ts";
+import type { CookieJar } from "../../lib/helpers/cookieJar.ts";
 
 let getFetchClientLocation = "getFetchClient";
 if (Deno.env.get("GET_FETCH_CLIENT_LOCATION")) {
@@ -76,10 +77,16 @@ stats.post("/stats", async (c) => {
     const metrics = c.get("metrics");
 
     let innertubeClient = c.get("innertubeClient");
+    let jar: CookieJar | undefined;
     if (body.cookies) {
-        innertubeClient =
-            (await getPooledSession(body.cookies, config, metrics, body.pageId))
-                .innertubeClient;
+        const session = await getPooledSession(
+            body.cookies,
+            config,
+            metrics,
+            body.pageId,
+        );
+        innertubeClient = session.innertubeClient;
+        jar = session.jar;
     }
 
     const client = innertubeClient.session.context.client;
@@ -125,16 +132,23 @@ stats.post("/stats", async (c) => {
     // Without the page id a brand channel's view is recorded against the account's own channel.
     const headers: HeadersInit = body.cookies
         ? {
-            cookie: body.cookies,
+            // the jar's copy, not the caller's: YouTube may have rotated it since it was stored
+            cookie: jar?.header ?? body.cookies,
             "user-agent": client.userAgent ?? "",
             ...(body.pageId ? { "x-goog-pageid": body.pageId } : {}),
         }
         : {};
 
     const response = await fetchClient(url.toString(), { headers });
+    jar?.apply(response.headers);
     await response.body?.cancel();
 
-    return c.json({ cpn, status: response.status });
+    // Handing the rotated cookies back is what lets the caller keep its stored copy usable.
+    return c.json({
+        cpn,
+        status: response.status,
+        ...(jar?.rotated ? { cookies: jar.header } : {}),
+    });
 });
 
 export default stats;

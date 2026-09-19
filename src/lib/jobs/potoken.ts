@@ -20,6 +20,7 @@ const { getFetchClient } = await import(getFetchClientLocation);
 
 import { InputMessage, OutputMessageSchema } from "./worker.ts";
 import { PLAYER_ID } from "../../constants.ts";
+import { CookieJar } from "../helpers/cookieJar.ts";
 
 interface TokenGeneratorWorker extends Omit<Worker, "postMessage"> {
     postMessage(message: InputMessage): void;
@@ -63,14 +64,20 @@ type FetchLike = (
 ) => Promise<Response>;
 
 /**
- * Wraps a fetch client so every YouTube request says which of the account's pages is asking.
+ * Wraps a fetch client with the two things a signed-in session needs beyond its cookies.
  *
- * Cookies identify an account; a brand channel of that account is addressed with this header, and
- * without it YouTube attributes the request to the account's own channel.
+ * `pageId` says which of the account's pages is asking — without it a brand channel's request is
+ * attributed to the account's own channel. The jar keeps the cookies current: it sends what it
+ * holds (overriding the snapshot YouTube.js was built with) and absorbs whatever comes back, so a
+ * rotated session token is used immediately rather than at the next restart.
  */
-const pageFetch = (inner: FetchLike, pageId: string): FetchLike => {
-    if (!pageId) return inner;
-    return (input, init = {}) => {
+const sessionFetch = (
+    inner: FetchLike,
+    pageId: string,
+    jar: CookieJar | undefined,
+): FetchLike => {
+    if (!pageId && !jar) return inner;
+    return async (input, init = {}) => {
         const url = typeof input === "string"
             ? input
             : input instanceof URL
@@ -80,8 +87,11 @@ const pageFetch = (inner: FetchLike, pageId: string): FetchLike => {
             return inner(input, init);
         }
         const headers = new Headers(init.headers ?? {});
-        headers.set("X-Goog-PageId", pageId);
-        return inner(input, { ...init, headers });
+        if (pageId) headers.set("X-Goog-PageId", pageId);
+        if (jar) headers.set("Cookie", jar.header);
+        const response = await inner(input, { ...init, headers });
+        jar?.apply(response.headers);
+        return response;
     };
 };
 
@@ -94,6 +104,8 @@ export const poTokenGenerate = (
         pageId?: string;
         validate?: boolean;
         poolKey?: string;
+        /** Shared with the caller, so rotated cookies can be written back to wherever they live. */
+        jar?: CookieJar;
     } = {},
 ): Promise<{ innertubeClient: Innertube; tokenMinter: TokenMinter }> => {
     const cookies = options.cookies ?? config.youtube_session.cookies;
@@ -143,7 +155,11 @@ export const poTokenGenerate = (
                     // `on_behalf_of_user`: combined with a locally generated session that drops the
                     // cookie authentication altogether and every request comes back 401. The header
                     // is what YouTube actually reads.
-                    fetch: pageFetch(getFetchClient(config), pageId),
+                    fetch: sessionFetch(
+                        getFetchClient(config),
+                        pageId,
+                        options.jar,
+                    ),
                     generate_session_locally: true,
                     cookie: cookies || undefined,
                     player_id: PLAYER_ID,
