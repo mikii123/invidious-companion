@@ -63,6 +63,27 @@ type FetchLike = (
     init?: RequestInit,
 ) => Promise<Response>;
 
+const YOUTUBE_ORIGIN = "https://www.youtube.com";
+
+/**
+ * How Google authenticates a cookie-bearing request: a SHA-1 of the timestamp, the SAPISID cookie
+ * and the origin, sent alongside the cookies. Without it the cookies count for nothing.
+ */
+const sapisidHash = async (
+    sapisid: string,
+    origin: string,
+): Promise<string> => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const digest = await crypto.subtle.digest(
+        "SHA-1",
+        new TextEncoder().encode(`${timestamp} ${sapisid} ${origin}`),
+    );
+    const hex = Array.from(new Uint8Array(digest))
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    return `SAPISIDHASH ${timestamp}_${hex}`;
+};
+
 /**
  * Wraps a fetch client with the two things a signed-in session needs beyond its cookies.
  *
@@ -86,9 +107,27 @@ const sessionFetch = (
         if (!/(^|\.)youtube\.com$/.test(new URL(url).hostname)) {
             return inner(input, init);
         }
-        const headers = new Headers(init.headers ?? {});
+        // Start from whatever the caller already set — YouTube.js may carry its headers on the
+        // Request rather than in init, and rebuilding from init alone dropped its Authorization and
+        // client headers, which YouTube answers with a bare 400.
+        const existing = init.headers ??
+            (input instanceof Request ? input.headers : undefined);
+        const headers = new Headers(existing ?? {});
         if (pageId) headers.set("X-Goog-PageId", pageId);
-        if (jar) headers.set("Cookie", jar.header);
+        if (jar) {
+            headers.set("Cookie", jar.header);
+            // YouTube.js only signs requests for a session it considers logged in, which a locally
+            // generated one is not — so a cookie arrived without its signature and YouTube answered
+            // 400. Google authenticates these by SAPISIDHASH, not by the cookie alone.
+            if (!headers.has("Authorization") && jar.sapisid) {
+                headers.set(
+                    "Authorization",
+                    await sapisidHash(jar.sapisid, YOUTUBE_ORIGIN),
+                );
+                headers.set("X-Origin", YOUTUBE_ORIGIN);
+                headers.set("Origin", YOUTUBE_ORIGIN);
+            }
+        }
         const response = await inner(input, { ...init, headers });
         jar?.apply(response.headers);
         return response;

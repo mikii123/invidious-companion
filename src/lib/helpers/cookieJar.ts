@@ -34,6 +34,12 @@ export class CookieJar {
         return this.#dirty;
     }
 
+    /** The cookie Google signs its requests with; absent means these cookies cannot authenticate. */
+    get sapisid(): string | undefined {
+        return this.#cookies.get("SAPISID") ??
+            this.#cookies.get("__Secure-3PAPISID");
+    }
+
     /**
      * Replaces the contents with the caller's current cookies.
      *

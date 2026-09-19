@@ -130,6 +130,7 @@ export const youtubePlayerParsing = async ({
                 videoDetails,
                 microformat,
                 playbackTracking,
+                responseContext,
             },
         ) => ({
             captions,
@@ -139,6 +140,9 @@ export const youtubePlayerParsing = async ({
             videoDetails,
             microformat,
             playbackTracking,
+            // carries `logged_in`, which is the only way to tell an authenticated response from an
+            // anonymous one — a player response has playbackTracking either way
+            responseContext,
         }))(videoData);
 
         if (videoData.playabilityStatus?.status == "OK") {

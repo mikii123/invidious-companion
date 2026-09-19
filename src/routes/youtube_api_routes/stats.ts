@@ -113,14 +113,13 @@ stats.post("/stats", async (c) => {
         url.searchParams.set("rt", "0");
         url.searchParams.set("rtn", "0");
     } else {
-        const start = Math.min(body.startPosition, body.position);
-        url.searchParams.set("st", start.toFixed(3));
-        url.searchParams.set("et", body.position.toFixed(3));
-        url.searchParams.set("cmt", body.position.toFixed(3));
-        url.searchParams.set(
-            "state",
-            body.event === "end" ? "paused" : "playing",
-        );
+        // Exactly the shape YouTube.js sends, which is the only one measured to actually register:
+        // one position in st, et and cmt, no `state`, and `final` only when playback is over.
+        // An interval (st before et) and a `state` of "paused" were quietly ignored by YouTube.
+        const position = body.position.toFixed(3);
+        url.searchParams.set("st", position);
+        url.searchParams.set("et", position);
+        url.searchParams.set("cmt", position);
         if (body.event === "end") {
             url.searchParams.set("final", "1");
         }
