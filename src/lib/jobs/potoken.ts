@@ -91,7 +91,15 @@ const sapisidHash = async (
  * attributed to the account's own channel. The jar keeps the cookies current: it sends what it
  * holds (overriding the snapshot YouTube.js was built with) and absorbs whatever comes back, so a
  * rotated session token is used immediately rather than at the next restart.
+ *
+ * The credentials only go to web clients. A player request that comes back without stream URLs is
+ * retried against TV and Android clients, and those answer a cookie-bearing request with a bare
+ * 400 — one such retry used to fail the whole request. Stripped of the credentials they succeed,
+ * and since only their stream URLs are kept, the response still carries the signed-in session's
+ * playback tracking.
  */
+const WEB_CLIENTS = ["1", "2"];
+
 const sessionFetch = (
     inner: FetchLike,
     pageId: string,
@@ -113,23 +121,41 @@ const sessionFetch = (
         const existing = init.headers ??
             (input instanceof Request ? input.headers : undefined);
         const headers = new Headers(existing ?? {});
-        if (pageId) headers.set("X-Goog-PageId", pageId);
-        if (jar) {
-            headers.set("Cookie", jar.header);
-            // YouTube.js only signs requests for a session it considers logged in, which a locally
-            // generated one is not — so a cookie arrived without its signature and YouTube answered
-            // 400. Google authenticates these by SAPISIDHASH, not by the cookie alone.
-            if (!headers.has("Authorization") && jar.sapisid) {
-                headers.set(
-                    "Authorization",
-                    await sapisidHash(jar.sapisid, YOUTUBE_ORIGIN),
-                );
-                headers.set("X-Origin", YOUTUBE_ORIGIN);
-                headers.set("Origin", YOUTUBE_ORIGIN);
+        const client = headers.get("X-Youtube-Client-Name");
+
+        if (client !== null && !WEB_CLIENTS.includes(client)) {
+            headers.delete("Cookie");
+            headers.delete("Authorization");
+            headers.delete("X-Goog-AuthUser");
+            headers.delete("X-Goog-PageId");
+        } else {
+            if (pageId) headers.set("X-Goog-PageId", pageId);
+            if (jar) {
+                headers.set("Cookie", jar.header);
+                // YouTube.js only signs requests for a session it considers logged in, which a
+                // locally generated one is not — so a cookie arrived without its signature and
+                // YouTube answered 400. Google authenticates these by SAPISIDHASH, not by the
+                // cookie alone.
+                if (!headers.has("Authorization") && jar.sapisid) {
+                    headers.set(
+                        "Authorization",
+                        await sapisidHash(jar.sapisid, YOUTUBE_ORIGIN),
+                    );
+                    headers.set("X-Origin", YOUTUBE_ORIGIN);
+                    headers.set("Origin", YOUTUBE_ORIGIN);
+                }
             }
         }
+
         const response = await inner(input, { ...init, headers });
         jar?.apply(response.headers);
+        if (jar && !response.ok) {
+            console.log(
+                `[WARN] signed-in request failed: ${response.status} ${
+                    new URL(url).pathname
+                } client=${client}`,
+            );
+        }
         return response;
     };
 };
