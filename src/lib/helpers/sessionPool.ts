@@ -21,10 +21,18 @@ const SESSION_TTL = 6 * 60 * 60 * 1000;
 
 const sessions = new Map<string, PoolEntry>();
 
+/**
+ * Identifies the session, and must survive a rotation.
+ *
+ * Keying on the whole cookie string would mint a new session — and a new PO token — every time
+ * YouTube rotates anything, so it keys on SAPISID, which identifies the account and does not
+ * rotate, plus the page being acted as.
+ */
 const poolKey = async (cookies: string, pageId: string): Promise<string> => {
+    const identity = /(?:^|;\s*)SAPISID=([^;]*)/.exec(cookies)?.[1] ?? cookies;
     const digest = await crypto.subtle.digest(
         "SHA-256",
-        new TextEncoder().encode(`${cookies}\n${pageId}`),
+        new TextEncoder().encode(`${identity}\n${pageId}`),
     );
     return Array.from(new Uint8Array(digest))
         .map((byte) => byte.toString(16).padStart(2, "0"))
@@ -62,7 +70,12 @@ export const getPooledSession = async (
     const key = await poolKey(cookies, pageId);
     const cached = sessions.get(key);
     if (cached && Date.now() - cached.createdAt < SESSION_TTL) {
-        return cached.session;
+        // The caller is the owner: take its cookies rather than keeping the ones this session
+        // started with. Two parties presenting different session tokens for the same account is
+        // what makes YouTube drop it — measured at about 17 minutes.
+        const session = await cached.session;
+        session.jar.reset(cookies);
+        return session;
     }
 
     const jar = new CookieJar(cookies);

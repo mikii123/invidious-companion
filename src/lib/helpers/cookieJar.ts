@@ -7,10 +7,11 @@
  * in, so the jar applies what comes back and reports whether it changed.
  */
 export class CookieJar {
-    #cookies = new Map<string, string>();
+    #cookies: Map<string, string>;
     #dirty = false;
 
     constructor(header: string) {
+        this.#cookies = new Map();
         for (const part of header.split(/;\s*/)) {
             const separator = part.indexOf("=");
             if (separator > 0) {
@@ -28,9 +29,21 @@ export class CookieJar {
             .join("; ");
     }
 
-    /** Whether anything has been rotated since this jar was created. */
+    /** Whether anything has been rotated since the jar was last seeded. */
     get rotated(): boolean {
         return this.#dirty;
+    }
+
+    /**
+     * Replaces the contents with the caller's current cookies.
+     *
+     * The caller owns them: it stores them and knows about rotations from elsewhere. A session that
+     * kept its own copy instead would drift, and two parties presenting different session tokens for
+     * one account is exactly what makes YouTube drop the account — measured at about 17 minutes.
+     */
+    reset(header: string): void {
+        this.#cookies = new CookieJar(header).#cookies;
+        this.#dirty = false;
     }
 
     /** Applies a response's Set-Cookie headers, the way a browser would. */
