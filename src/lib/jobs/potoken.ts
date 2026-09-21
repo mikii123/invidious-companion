@@ -231,13 +231,27 @@ export const poTokenGenerate = (
                 });
                 const minter = createMinter(worker);
                 if (validate) {
-                    // check token from minter
-                    await checkToken({
-                        instantiatedInnertubeClient,
-                        config,
-                        integrityTokenBasedMinter: minter,
-                        metrics,
-                    });
+                    try {
+                        // check token from minter
+                        await checkToken({
+                            instantiatedInnertubeClient,
+                            config,
+                            integrityTokenBasedMinter: minter,
+                            metrics,
+                        });
+                    } catch (err) {
+                        // Advisory, not a gate. The check asks YouTube for three random videos and
+                        // wants stream URLs back; when YouTube is refusing signed-out sessions it
+                        // refuses these too, and every regeneration is thrown away — leaving the
+                        // instance answering "Companion is starting" to everything, indefinitely.
+                        // A session that might serve some videos is worth more than none, and the
+                        // caller sees YouTube's own reason instead of ours and can act on it.
+                        console.log(
+                            "[WARN] PO token did not validate; serving with it anyway",
+                            { err },
+                        );
+                        metrics?.potokenGenerationFailure.inc();
+                    }
                 }
                 console.log("[INFO] Successfully generated PO token");
                 const numberToKill = workers.length - 1;
