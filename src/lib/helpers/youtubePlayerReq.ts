@@ -62,13 +62,20 @@ export const youtubePlayerReq = async (
         contentPoToken,
     );
 
-    // Check if the first adaptive format URL is undefined, if it is then fallback to multiple YT clients
+    // Fall back to other clients only when this response carries nothing playable at all.
+    //
+    // A ciphered format is playable: youtubePlayerParsing deciphers it, and the fallback loop below
+    // accepts `signatureCipher` from the clients it tries. Triggering on a missing `url` alone made
+    // that inconsistent — a signed-in WEB response, which is ciphered as a matter of course, was
+    // thrown away for an MWEB one whose URLs googlevideo then answered 403.
+    const firstAdaptiveFormat =
+        youtubePlayerResponse.data.streamingData?.adaptiveFormats?.[0];
 
     if (
         !innertubeClientOauthEnabled &&
         youtubePlayerResponse.data.streamingData &&
-        youtubePlayerResponse.data.streamingData.adaptiveFormats[0].url ===
-            undefined
+        firstAdaptiveFormat?.url === undefined &&
+        firstAdaptiveFormat?.signatureCipher === undefined
     ) {
         console.log(
             "[WARNING] No URLs found for adaptive formats. Falling back to other YT clients.",
