@@ -233,8 +233,36 @@ async function setup(
         integrityToken: integrityTokenBody[0],
     }, webPoSignalOutput);
 
+    // What the streaming token is bound to depends on who the session is.
+    //
+    // Signed out, googlevideo checks it against the visitor id. Signed in, it checks the account's
+    // data sync id instead — and a token bound to the wrong one is not refused outright: the first
+    // range of a file comes back and every one after it is a 403, so a video plays for a second and
+    // then dies. The id is on the response context of any authenticated request.
+    let contentBinding = visitorData;
+    if (innertubeClientCookies) {
+        try {
+            const response = await innertubeClient.actions.execute("/guide", {
+                parse: false,
+            });
+            const datasyncId = response.data?.responseContext
+                ?.mainAppWebResponseContext?.datasyncId;
+            // "<channel sync id>||<user sync id>" — the first part is the one that identifies the
+            // session, and the second is empty unless a brand channel is acting.
+            if (typeof datasyncId === "string" && datasyncId) {
+                contentBinding = datasyncId.split("||")[0];
+            } else {
+                console.log(
+                    "[WARN] signed-in session has no data sync id; binding the token to the visitor id",
+                );
+            }
+        } catch (err) {
+            console.log("[WARN] could not read the data sync id", { err });
+        }
+    }
+
     const sessionPoToken = await integrityTokenBasedMinter.mintAsWebsafeString(
-        visitorData,
+        contentBinding,
     );
 
     return {
