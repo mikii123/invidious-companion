@@ -8,8 +8,6 @@ import { verifyRequest } from "../../lib/helpers/verifyRequest.ts";
 import { HTTPException } from "hono/http-exception";
 import { encryptQuery } from "../../lib/helpers/encryptQuery.ts";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
-import { getPooledSession } from "../../lib/helpers/sessionPool.ts";
-import type { CookieJar } from "../../lib/helpers/cookieJar.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 const PRIVATE_PARAM_NAMES = ["pot", "ip"];
@@ -21,28 +19,13 @@ dashManifest.get("/:videoId", async (c) => {
     const { check, local } = c.req.query();
     c.header("access-control-allow-origin", "*");
 
+    const innertubeClient = c.get("innertubeClient");
     const config = c.get("config");
     const metrics = c.get("metrics");
-
-    // The manifest is built from a player response of its own, so it meets the same wall the player
-    // route does when YouTube refuses signed-out sessions. Credentials arrive in a header rather
-    // than the query string: a URL is the one part of a request that gets logged everywhere.
-    const cookies = c.req.header("x-yt-cookies");
-    const pageId = c.req.header("x-yt-pageid") ?? "";
-
-    let innertubeClient = c.get("innertubeClient");
-    let tokenMinter = c.get("tokenMinter");
-    let jar: CookieJar | undefined;
-
-    if (cookies) {
-        const session = await getPooledSession(cookies, config, metrics, pageId);
-        innertubeClient = session.innertubeClient;
-        tokenMinter = session.tokenMinter;
-        jar = session.jar;
-    }
+    const tokenMinter = c.get("tokenMinter");
 
     // Check if tokenMinter is ready (only needed when PO token is enabled)
-    if (!cookies && config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
+    if (config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
         throw new HTTPException(503, {
             res: new Response(TOKEN_MINTER_NOT_READY_MESSAGE),
         });
@@ -72,13 +55,7 @@ dashManifest.get("/:videoId", async (c) => {
         config,
         tokenMinter: tokenMinter!,
         metrics,
-        // A signed-in response must never be served from, or written to, the shared cache.
-        overrideCache: Boolean(cookies),
     });
-
-    // Handing the rotated cookies back is what keeps the caller's stored copy usable; the body here
-    // is XML, so they ride on a header.
-    if (jar?.rotated) c.header("x-yt-cookies", jar.header);
     const videoInfo = youtubeVideoInfo(
         innertubeClient,
         youtubePlayerResponseJson,
