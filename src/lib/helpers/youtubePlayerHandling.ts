@@ -19,6 +19,26 @@ const { youtubePlayerReq } = await import(youtubePlayerReqLocation);
 import type { Config } from "./config.ts";
 import { getKv } from "./kv.ts";
 
+// Which token googlevideo checks a stream URL against depends on the client that issued it.
+// URLs from the web clients are checked against a token bound to the video: with the session
+// token (bound to the visitor) they serve the first minute and answer 403 after it — measured on
+// MWEB and WEB_CREATOR, signed in, with every other binding. URLs from the TV and Android clients
+// are the other way round and keep the session token that decipher() put on them.
+const WEB_URL_CLIENTS = new Set([
+    "WEB",
+    "MWEB",
+    "WEB_CREATOR",
+    "WEB_EMBEDDED_PLAYER",
+]);
+
+const bindPoToken = (url: string, contentPoToken?: string): string => {
+    if (!contentPoToken) return url;
+    const parsed = new URL(url);
+    if (!WEB_URL_CLIENTS.has(parsed.searchParams.get("c") ?? "")) return url;
+    parsed.searchParams.set("pot", contentPoToken);
+    return parsed.toString();
+};
+
 export const youtubePlayerParsing = async ({
     innertubeClient,
     videoId,
@@ -77,6 +97,9 @@ export const youtubePlayerParsing = async ({
                 !clientNameUsed?.value.includes("IOS") &&
                 !clientNameUsed?.value.includes("ANDROID")
             ) {
+                const contentPoToken = tokenMinter
+                    ? await tokenMinter(videoId)
+                    : undefined;
                 for (
                     let index = 0;
                     index < streamingData.formats.length;
@@ -84,10 +107,12 @@ export const youtubePlayerParsing = async ({
                 ) {
                     const format = videoData.streamingData.formats[index];
 
-                    format.url = await streamingData.formats[index]
-                        .decipher(
+                    format.url = bindPoToken(
+                        await streamingData.formats[index].decipher(
                             innertubeClient.session.player,
-                        );
+                        ),
+                        contentPoToken,
+                    );
                     if (format.signatureCipher !== undefined) {
                         delete format.signatureCipher;
                     }
@@ -105,10 +130,12 @@ export const youtubePlayerParsing = async ({
                     const format =
                         videoData.streamingData.adaptiveFormats[index];
 
-                    format.url = await streamingData.adaptive_formats[index]
-                        .decipher(
+                    format.url = bindPoToken(
+                        await streamingData.adaptive_formats[index].decipher(
                             innertubeClient.session.player,
-                        );
+                        ),
+                        contentPoToken,
+                    );
                     if (format.signatureCipher !== undefined) {
                         delete format.signatureCipher;
                     }

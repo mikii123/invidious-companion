@@ -68,8 +68,8 @@ export const youtubePlayerReq = async (
     // accepts `signatureCipher` from the clients it tries. Triggering on a missing `url` alone made
     // that inconsistent — a signed-in WEB response, which is ciphered as a matter of course, was
     // thrown away for an MWEB one whose URLs googlevideo then answered 403.
-    const firstAdaptiveFormat =
-        youtubePlayerResponse.data.streamingData?.adaptiveFormats?.[0];
+    const firstAdaptiveFormat = youtubePlayerResponse.data.streamingData
+        ?.adaptiveFormats?.[0];
 
     if (
         !innertubeClientOauthEnabled &&
@@ -80,11 +80,12 @@ export const youtubePlayerReq = async (
         console.log(
             "[WARNING] No URLs found for adaptive formats. Falling back to other YT clients.",
         );
-        const innertubeClientsTypeFallback = [
-            "TV_SIMPLY",
-            "ANDROID_VR",
-            "MWEB",
-        ];
+        // A signed-in session goes to the web client that still hands out URLs to cookies first.
+        // The TV and Android fallbacks are signed-out requests, and a URL they issue to a signed-in
+        // session's visitor serves one byte range and then 403s (measured).
+        const innertubeClientsTypeFallback = innertubeClient.session.logged_in
+            ? ["WEB_CREATOR", "MWEB", "TV_SIMPLY", "ANDROID_VR"]
+            : ["TV_SIMPLY", "ANDROID_VR", "MWEB"];
 
         for await (const innertubeClientType of innertubeClientsTypeFallback) {
             console.log(

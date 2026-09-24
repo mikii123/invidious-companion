@@ -7,6 +7,10 @@ import {
 import { verifyRequest } from "../../lib/helpers/verifyRequest.ts";
 import { encryptQuery } from "../../lib/helpers/encryptQuery.ts";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
+import {
+    requestSession,
+    returnRotatedCookies,
+} from "../../lib/helpers/requestSession.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 const PRIVATE_PARAM_NAMES = ["pot", "ip"];
@@ -29,13 +33,18 @@ latestVersion.get("/", async (c) => {
         });
     }
 
-    const innertubeClient = c.get("innertubeClient");
     const config = c.get("config");
     const metrics = c.get("metrics");
-    const tokenMinter = c.get("tokenMinter");
+    const { innertubeClient, tokenMinter, jar, signedIn } =
+        await requestSession(
+            c,
+        );
 
     // Check if tokenMinter is ready (only needed when PO token is enabled)
-    if (config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
+    if (
+        !signedIn && config.jobs.youtube_session.po_token_enabled &&
+        !tokenMinter
+    ) {
         throw new HTTPException(503, {
             res: new Response(TOKEN_MINTER_NOT_READY_MESSAGE),
         });
@@ -59,7 +68,9 @@ latestVersion.get("/", async (c) => {
         config,
         tokenMinter: tokenMinter!,
         metrics,
+        overrideCache: signedIn,
     });
+    returnRotatedCookies(c, jar);
     const videoInfo = youtubeVideoInfo(
         innertubeClient,
         youtubePlayerResponseJson,

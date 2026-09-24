@@ -98,7 +98,8 @@ const sapisidHash = async (
  * and since only their stream URLs are kept, the response still carries the signed-in session's
  * playback tracking.
  */
-const WEB_CLIENTS = ["1", "2"];
+// WEB, MWEB and WEB_CREATOR
+const WEB_CLIENTS = ["1", "2", "62"];
 
 const sessionFetch = (
     inner: FetchLike,

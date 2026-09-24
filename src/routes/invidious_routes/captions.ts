@@ -9,6 +9,10 @@ import type { CaptionTrackData } from "youtubei.js/PlayerCaptionsTracklist";
 import { handleTranscripts } from "../../lib/helpers/youtubeTranscriptsHandling.ts";
 import { HTTPException } from "hono/http-exception";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
+import {
+    requestSession,
+    returnRotatedCookies,
+} from "../../lib/helpers/requestSession.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 interface AvailableCaption {
@@ -22,7 +26,10 @@ captionsHandler.get("/:videoId", async (c) => {
     const { videoId } = c.req.param();
     const config = c.get("config");
     const metrics = c.get("metrics");
-    const tokenMinter = c.get("tokenMinter");
+    const { innertubeClient, tokenMinter, jar, signedIn } =
+        await requestSession(
+            c,
+        );
 
     const check = c.req.query("check");
 
@@ -40,7 +47,10 @@ captionsHandler.get("/:videoId", async (c) => {
     }
 
     // Check if tokenMinter is ready (only needed when PO token is enabled)
-    if (config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
+    if (
+        !signedIn && config.jobs.youtube_session.po_token_enabled &&
+        !tokenMinter
+    ) {
         throw new HTTPException(503, {
             res: new Response(TOKEN_MINTER_NOT_READY_MESSAGE),
         });
@@ -58,15 +68,15 @@ captionsHandler.get("/:videoId", async (c) => {
         }
     }
 
-    const innertubeClient = c.get("innertubeClient");
-
     const youtubePlayerResponseJson = await youtubePlayerParsing({
         innertubeClient,
         videoId,
         config,
         metrics,
         tokenMinter: tokenMinter!,
+        overrideCache: signedIn,
     });
+    returnRotatedCookies(c, jar);
 
     const videoInfo = youtubeVideoInfo(
         innertubeClient,

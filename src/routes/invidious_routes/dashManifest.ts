@@ -8,6 +8,10 @@ import { verifyRequest } from "../../lib/helpers/verifyRequest.ts";
 import { HTTPException } from "hono/http-exception";
 import { encryptQuery } from "../../lib/helpers/encryptQuery.ts";
 import { validateVideoId } from "../../lib/helpers/validateVideoId.ts";
+import {
+    requestSession,
+    returnRotatedCookies,
+} from "../../lib/helpers/requestSession.ts";
 import { TOKEN_MINTER_NOT_READY_MESSAGE } from "../../constants.ts";
 
 const PRIVATE_PARAM_NAMES = ["pot", "ip"];
@@ -19,13 +23,21 @@ dashManifest.get("/:videoId", async (c) => {
     const { check, local } = c.req.query();
     c.header("access-control-allow-origin", "*");
 
-    const innertubeClient = c.get("innertubeClient");
     const config = c.get("config");
     const metrics = c.get("metrics");
-    const tokenMinter = c.get("tokenMinter");
+
+    // The manifest is built from a player response of its own, so it meets the same wall the player
+    // route does when YouTube refuses signed-out sessions; a caller with cookies can ask as their owner.
+    const { innertubeClient, tokenMinter, jar, signedIn } =
+        await requestSession(
+            c,
+        );
 
     // Check if tokenMinter is ready (only needed when PO token is enabled)
-    if (config.jobs.youtube_session.po_token_enabled && !tokenMinter) {
+    if (
+        !signedIn && config.jobs.youtube_session.po_token_enabled &&
+        !tokenMinter
+    ) {
         throw new HTTPException(503, {
             res: new Response(TOKEN_MINTER_NOT_READY_MESSAGE),
         });
@@ -55,7 +67,11 @@ dashManifest.get("/:videoId", async (c) => {
         config,
         tokenMinter: tokenMinter!,
         metrics,
+        // A signed-in response must never be served from, or written to, the shared cache.
+        overrideCache: signedIn,
     });
+    returnRotatedCookies(c, jar);
+
     const videoInfo = youtubeVideoInfo(
         innertubeClient,
         youtubePlayerResponseJson,
